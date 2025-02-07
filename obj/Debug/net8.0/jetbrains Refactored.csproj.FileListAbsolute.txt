@@ -12,3 +12,11 @@ C:\Clion Projects\jetbrains Refactored\obj\Debug\net8.0\refint\jetbrains Refacto
 C:\Clion Projects\jetbrains Refactored\obj\Debug\net8.0\jetbrains Refactored.pdb
 C:\Clion Projects\jetbrains Refactored\obj\Debug\net8.0\jetbrains Refactored.genruntimeconfig.cache
 C:\Clion Projects\jetbrains Refactored\obj\Debug\net8.0\ref\jetbrains Refactored.dll
+C:\Clion Projects\jetbrains Refactored\obj\Debug\net8.0\jetbrains Refactored.sourcelink.json
+C:\Clion Projects\jetbrains Refactored\bin\Debug\net8.0\Spectre.Console.dll
+C:\Clion Projects\jetbrains Refactored\bin\Debug\net8.0\Spectre.Console.Cli.dll
+C:\Clion Projects\jetbrains Refactored\bin\Debug\net8.0\de\Spectre.Console.Cli.resources.dll
+C:\Clion Projects\jetbrains Refactored\bin\Debug\net8.0\fr\Spectre.Console.Cli.resources.dll
+C:\Clion Projects\jetbrains Refactored\bin\Debug\net8.0\sv\Spectre.Console.Cli.resources.dll
+C:\Clion Projects\jetbrains Refactored\obj\Debug\net8.0\jetbrains Refactored.csproj.AssemblyReference.cache
+C:\Clion Projects\jetbrains Refactored\obj\Debug\net8.0\jetbrain.05B50D2E.Up2Date

